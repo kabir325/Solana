@@ -10,9 +10,10 @@ export const CreateToken: FC = () => {
   const { connection } = useConnection();
   const [tokenName, setTokenName] = useState('');
   const [tokenSymbol, setTokenSymbol] = useState('');
-  const [decimals, setDecimals] = useState(9);
+  const [decimals, setDecimals] = useState(0); // Changed default to 0 to save SOL
   const [isLoading, setIsLoading] = useState(false);
   const [lastSignature, setLastSignature] = useState<string | null>(null);
+  const [network, setNetwork] = useState<'mainnet' | 'devnet'>('devnet'); // Add network selection
 
   const handleCreateToken = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,9 +31,14 @@ export const CreateToken: FC = () => {
     setIsLoading(true);
     
     try {
+      // Select endpoint based on network choice
+      const endpoint = network === 'mainnet' 
+        ? 'https://solana-mainnet.g.alchemy.com/v2/demo' // Use Alchemy's endpoint which has higher rate limits
+        : 'https://api.devnet.solana.com';
+      
       // Create a dedicated connection for token creation with longer timeout
       const tokenConnection = new web3.Connection(
-        'https://api.mainnet-beta.solana.com',
+        endpoint,
         {
           commitment: 'confirmed',
           confirmTransactionInitialTimeout: 90000, // 90 seconds timeout
@@ -85,12 +91,15 @@ export const CreateToken: FC = () => {
       );
       
       // Add instruction to mint some tokens to the user's wallet
+      // For testing, mint a smaller amount to save on transaction size
+      const mintAmount = decimals === 0 ? 1000 : 1000 * Math.pow(10, decimals);
+      
       transaction.add(
         token.createMintToInstruction(
           mintAccount.publicKey,      // mint
           associatedTokenAccount,     // destination
           publicKey,                  // authority
-          1000000000 * Math.pow(10, decimals),  // amount (1 billion tokens)
+          BigInt(mintAmount),         // amount (1000 tokens)
           []                          // signer array
         )
       );
@@ -131,28 +140,15 @@ export const CreateToken: FC = () => {
           <p>Token created successfully!</p>
           <p className="font-mono text-xs break-all mt-1">Mint: {mintAddress}</p>
           <p className="font-mono text-xs break-all mt-1">Token Account: {associatedTokenAccount.toString()}</p>
+          <p className="text-xs mt-1">Network: {network}</p>
         </div>,
         { duration: 10000 }
-      );
-      
-      // Add instructions for adding to wallet
-      toast.info(
-        <div>
-          <p>To see your token in Phantom:</p>
-          <ol className="list-decimal pl-5 mt-1 text-sm">
-            <li>Open Phantom</li>
-            <li>Click "Tokens"</li>
-            <li>Click "+" button</li>
-            <li>Paste your mint address</li>
-          </ol>
-        </div>,
-        { duration: 15000 }
       );
       
       // Reset form
       setTokenName('');
       setTokenSymbol('');
-      setDecimals(9);
+      setDecimals(0);
     } catch (error) {
       console.error('Error creating token:', error);
       toast.dismiss('creating-token');
@@ -169,7 +165,7 @@ export const CreateToken: FC = () => {
             </div>
           );
           if (lastSignature) {
-            const explorerUrl = `https://explorer.solana.com/tx/${lastSignature}`;
+            const explorerUrl = `https://${network === 'devnet' ? 'explorer.solana.com/?cluster=devnet' : 'explorer.solana.com'}/tx/${lastSignature}`;
             toast.info(
               <div>
                 <p>Check transaction status:</p>
@@ -215,17 +211,17 @@ export const CreateToken: FC = () => {
   };
 
   return (
-    <div className="bg-white shadow-md rounded-lg p-6 mb-6">
+    <div className="bg-white dark:bg-gray-800 shadow-md rounded-lg p-6 mb-6">
       <h2 className="text-2xl font-bold mb-4">Create New Token</h2>
       <form onSubmit={handleCreateToken}>
         <div className="mb-4">
-          <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="tokenName">
+          <label className="block text-gray-700 dark:text-gray-300 text-sm font-bold mb-2" htmlFor="tokenName">
             Token Name
           </label>
           <input
             id="tokenName"
             type="text"
-            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 dark:text-white dark:bg-gray-700 leading-tight focus:outline-none focus:shadow-outline"
             placeholder="My Token"
             value={tokenName}
             onChange={(e) => setTokenName(e.target.value)}
@@ -233,21 +229,21 @@ export const CreateToken: FC = () => {
           />
         </div>
         <div className="mb-4">
-          <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="tokenSymbol">
+          <label className="block text-gray-700 dark:text-gray-300 text-sm font-bold mb-2" htmlFor="tokenSymbol">
             Token Symbol
           </label>
           <input
             id="tokenSymbol"
             type="text"
-            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 dark:text-white dark:bg-gray-700 leading-tight focus:outline-none focus:shadow-outline"
             placeholder="MTK"
             value={tokenSymbol}
             onChange={(e) => setTokenSymbol(e.target.value)}
             disabled={isLoading}
           />
         </div>
-        <div className="mb-6">
-          <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="decimals">
+        <div className="mb-4">
+          <label className="block text-gray-700 dark:text-gray-300 text-sm font-bold mb-2" htmlFor="decimals">
             Decimals
           </label>
           <input
@@ -255,13 +251,47 @@ export const CreateToken: FC = () => {
             type="number"
             min="0"
             max="9"
-            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 dark:text-white dark:bg-gray-700 leading-tight focus:outline-none focus:shadow-outline"
             value={decimals.toString()}
             onChange={handleDecimalsChange}
             disabled={isLoading}
           />
-          <p className="text-xs text-gray-500 mt-1">
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
             Lower values (0-2) use less SOL. Standard is 9 (like SOL).
+          </p>
+        </div>
+        <div className="mb-6">
+          <label className="block text-gray-700 dark:text-gray-300 text-sm font-bold mb-2">
+            Network
+          </label>
+          <div className="flex space-x-4">
+            <label className="inline-flex items-center">
+              <input
+                type="radio"
+                className="form-radio"
+                name="network"
+                value="devnet"
+                checked={network === 'devnet'}
+                onChange={() => setNetwork('devnet')}
+                disabled={isLoading}
+              />
+              <span className="ml-2 text-gray-700 dark:text-gray-300">Devnet (Recommended for testing)</span>
+            </label>
+            <label className="inline-flex items-center">
+              <input
+                type="radio"
+                className="form-radio"
+                name="network"
+                value="mainnet"
+                checked={network === 'mainnet'}
+                onChange={() => setNetwork('mainnet')}
+                disabled={isLoading}
+              />
+              <span className="ml-2 text-gray-700 dark:text-gray-300">Mainnet</span>
+            </label>
+          </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Use Devnet for testing to save real SOL.
           </p>
         </div>
         <div className="flex items-center justify-between">
