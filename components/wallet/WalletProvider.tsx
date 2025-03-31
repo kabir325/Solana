@@ -1,3 +1,10 @@
+/**
+ * WalletProvider Component
+ * 
+ * This component provides wallet connection functionality to the application
+ * using Solana wallet adapters. It sets up the connection provider and
+ * wallet adapters for Phantom and Solflare wallets.
+ */
 'use client';
 
 import { FC, ReactNode, useMemo } from 'react';
@@ -7,7 +14,6 @@ import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
 import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adapter-wallets';
 import { clusterApiUrl } from '@solana/web3.js';
 
-// Import the required CSS for the wallet adapter
 import '@solana/wallet-adapter-react-ui/styles.css';
 
 interface WalletProviderProps {
@@ -15,13 +21,9 @@ interface WalletProviderProps {
 }
 
 export const WalletProvider: FC<WalletProviderProps> = ({ children }) => {
-  // Change from Devnet to MainnetBeta to see your real tokens
-  const network = WalletAdapterNetwork.Mainnet;
-
-  // Use the default endpoint for the selected network
+  const network = WalletAdapterNetwork.Devnet;
   const endpoint = useMemo(() => clusterApiUrl(network), [network]);
 
-  // @solana/wallet-adapter-wallets includes all the adapters but supports tree shaking and lazy loading
   const wallets = useMemo(
     () => [
       new PhantomWalletAdapter(),

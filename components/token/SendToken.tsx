@@ -1,9 +1,16 @@
-// src/components/token/SendToken.tsx
+/**
+ * SendToken Component
+ * 
+ * This component allows users to send SPL tokens to other wallets.
+ * It handles token transfers with proper validation, error handling,
+ * and user feedback throughout the process.
+ */
 import { FC, useState } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import * as web3 from '@solana/web3.js';
 import * as token from '@solana/spl-token';
 import toast from 'react-hot-toast';
+import { getReliableConnection, withRetry } from '@/utils/connection';
 
 export const SendToken: FC = () => {
   const { publicKey, sendTransaction } = useWallet();
@@ -12,6 +19,7 @@ export const SendToken: FC = () => {
   const [recipientAddress, setRecipientAddress] = useState('');
   const [amount, setAmount] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [decimals, setDecimals] = useState(9);
 
   const handleSendToken = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,83 +35,134 @@ export const SendToken: FC = () => {
     }
     
     setIsLoading(true);
+    const toastId = toast.loading('Preparing transaction...');
     
     try {
-      // Convert addresses to PublicKeys
-      const mintPubkey = new web3.PublicKey(mintAddress);
-      const recipientPubkey = new web3.PublicKey(recipientAddress);
+      const reliableConnection = getReliableConnection(connection.rpcEndpoint);
       
-      // Get source token account (sender's associated token account)
+      let mintPubkey: web3.PublicKey;
+      let recipientPubkey: web3.PublicKey;
+      
+      try {
+        mintPubkey = new web3.PublicKey(mintAddress);
+      } catch (error) {
+        toast.error('Invalid mint address format', { id: toastId });
+        return;
+      }
+      
+      try {
+        recipientPubkey = new web3.PublicKey(recipientAddress);
+      } catch (error) {
+        toast.error('Invalid recipient address format', { id: toastId });
+        return;
+      }
+      
+      try {
+        const mintInfo = await withRetry(() => 
+          token.getMint(reliableConnection, mintPubkey)
+        );
+        setDecimals(mintInfo.decimals);
+        console.log('Token decimals:', mintInfo.decimals);
+      } catch (error) {
+        console.error('Error getting mint info:', error);
+        toast.error('Could not verify token mint. Please check the address.', { id: toastId });
+        return;
+      }
+      
       const sourceTokenAddress = await token.getAssociatedTokenAddress(
         mintPubkey,
         publicKey
       );
       
-      // Get destination token account (recipient's associated token account)
+      const sourceAccountInfo = await reliableConnection.getAccountInfo(sourceTokenAddress);
+      if (!sourceAccountInfo) {
+        toast.error('You don\'t have a token account for this token', { id: toastId });
+        return;
+      }
+      
       const destinationTokenAddress = await token.getAssociatedTokenAddress(
         mintPubkey,
         recipientPubkey
       );
       
-      // Create a new transaction
       const transaction = new web3.Transaction();
       
-      // Check if recipient's token account exists
-      const destinationAccountInfo = await connection.getAccountInfo(destinationTokenAddress);
+      const destinationAccountInfo = await reliableConnection.getAccountInfo(destinationTokenAddress);
       
-      // If recipient's token account doesn't exist, create one
       if (!destinationAccountInfo) {
         transaction.add(
           token.createAssociatedTokenAccountInstruction(
-            publicKey,                 // payer
-            destinationTokenAddress,   // associated token account
-            recipientPubkey,           // owner
-            mintPubkey                 // mint
+            publicKey,
+            destinationTokenAddress,
+            recipientPubkey,
+            mintPubkey
           )
         );
       }
       
-      // Add instruction to transfer tokens
+      const transferAmount = decimals === 0 
+        ? Number(amount) 
+        : Number(amount) * Math.pow(10, decimals);
+      
+      console.log('Transfer amount:', transferAmount);
+      
       transaction.add(
         token.createTransferInstruction(
-          sourceTokenAddress,        // source
-          destinationTokenAddress,   // destination
-          publicKey,                 // authority
-          Number(amount) * Math.pow(10, 9)  // amount (with decimals)
+          sourceTokenAddress,
+          destinationTokenAddress,
+          publicKey,
+          BigInt(transferAmount)
         )
       );
       
-      // Send the transaction
-      const signature = await sendTransaction(transaction, connection);
+      const { blockhash, lastValidBlockHeight } = await reliableConnection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+      transaction.feePayer = publicKey;
       
-      // Wait for confirmation
-      await connection.confirmTransaction(signature, 'confirmed');
+      toast.loading('Sending transaction...', { id: toastId });
       
-      toast.success(`Successfully sent ${amount} tokens to ${recipientAddress.slice(0, 4)}...${recipientAddress.slice(-4)}`);
+      const signature = await sendTransaction(transaction, reliableConnection);
       
-      // Reset form
+      toast.loading('Confirming transaction...', { id: toastId });
+      
+      await reliableConnection.confirmTransaction({
+        signature,
+        blockhash,
+        lastValidBlockHeight
+      });
+      
+      toast.success(
+        `Successfully sent ${amount} tokens to ${recipientAddress.slice(0, 4)}...${recipientAddress.slice(-4)}`,
+        { id: toastId }
+      );
+      
       setAmount('');
       setRecipientAddress('');
     } catch (error) {
       console.error('Error sending tokens:', error);
-      toast.error('Failed to send tokens. Please check the addresses and try again.');
+      toast.error(
+        error instanceof Error 
+          ? `Failed to send tokens: ${error.message}` 
+          : 'Failed to send tokens. Please check the addresses and try again.',
+        { id: toastId }
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="bg-white shadow-md rounded-lg p-6">
-      <h2 className="text-2xl font-bold mb-4">Send Tokens</h2>
+    <div className="bg-[#2E236C]  rounded-lg p-6 border-4 border-[#17153B] text-white">
+      <h2 className="text-2xl font-bold mb-4 text-primary">Send Tokens</h2>
       <form onSubmit={handleSendToken}>
         <div className="mb-4">
-          <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="mintAddress">
+          <label className="block text-secondary text-sm font-bold mb-2" htmlFor="mintAddress">
             Token Mint Address
           </label>
           <input
             id="mintAddress"
             type="text"
-            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+            className="border border-neutral rounded w-full py-2 px-3 text-[gray-700] leading-tight focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
             placeholder="Enter token mint address"
             value={mintAddress}
             onChange={(e) => setMintAddress(e.target.value)}
@@ -111,13 +170,13 @@ export const SendToken: FC = () => {
           />
         </div>
         <div className="mb-4">
-          <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="recipientAddress">
+          <label className="block text-secondary text-sm font-bold mb-2" htmlFor="recipientAddress">
             Recipient Address
           </label>
           <input
             id="recipientAddress"
             type="text"
-            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+            className="border border-neutral rounded w-full py-2 px-3 text-[gray-700] leading-tight focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
             placeholder="Enter recipient wallet address"
             value={recipientAddress}
             onChange={(e) => setRecipientAddress(e.target.value)}
@@ -125,14 +184,14 @@ export const SendToken: FC = () => {
           />
         </div>
         <div className="mb-6">
-          <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="sendAmount">
+          <label className="block text-secondary text-sm font-bold mb-2" htmlFor="sendAmount">
             Amount
           </label>
           <input
             id="sendAmount"
             type="number"
             min="0.000001"
-            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+            className="border border-neutral rounded w-full py-2 px-3 text-[gray-700] leading-tight focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
             placeholder="Amount to send"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
@@ -142,7 +201,7 @@ export const SendToken: FC = () => {
         <div className="flex items-center justify-between">
           <button
             type="submit"
-            className={`bg-purple-500 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline ${
+            className={`bg-[#17153B] text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition-colors duration-200 ${
               isLoading ? 'opacity-50 cursor-not-allowed' : ''
             }`}
             disabled={isLoading || !publicKey}

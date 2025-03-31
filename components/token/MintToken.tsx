@@ -1,9 +1,17 @@
 // src/components/token/MintToken.tsx
+/**
+ * MintToken Component
+ * 
+ * This component allows users to mint SPL tokens to their wallet.
+ * It handles token minting with proper validation, error handling,
+ * and user feedback throughout the process.
+ */
 import { FC, useState } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import * as web3 from '@solana/web3.js';
 import * as token from '@solana/spl-token';
 import toast from 'react-hot-toast';
+import { getReliableConnection, withRetry } from '@/utils/connection';
 
 export const MintToken: FC = () => {
   const { publicKey, sendTransaction } = useWallet();
@@ -11,6 +19,7 @@ export const MintToken: FC = () => {
   const [mintAddress, setMintAddress] = useState('');
   const [amount, setAmount] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [decimals, setDecimals] = useState(9);
 
   const handleMintToken = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,75 +35,109 @@ export const MintToken: FC = () => {
     }
     
     setIsLoading(true);
+    const toastId = toast.loading('Preparing to mint tokens...');
     
     try {
-      // Convert mint address string to PublicKey
-      const mintPubkey = new web3.PublicKey(mintAddress);
+      let mintPubkey: web3.PublicKey;
+      try {
+        mintPubkey = new web3.PublicKey(mintAddress);
+      } catch (error) {
+        toast.error('Invalid mint address format');
+        return;
+      }
       
-      // Get or create associated token account
+      const reliableConnection = getReliableConnection(connection.rpcEndpoint);
+      
+      try {
+        const mintInfo = await withRetry(() => 
+          token.getMint(reliableConnection, mintPubkey)
+        );
+        setDecimals(mintInfo.decimals);
+        console.log('Mint decimals:', mintInfo.decimals);
+      } catch (error) {
+        console.error('Error getting mint info:', error);
+        toast.error('Could not verify mint. Please check the address and try again.');
+        return;
+      }
+      
       const associatedTokenAddress = await token.getAssociatedTokenAddress(
         mintPubkey,
         publicKey
       );
       
-      // Check if the associated token account exists
-      const tokenAccount = await connection.getAccountInfo(associatedTokenAddress);
+      const tokenAccount = await reliableConnection.getAccountInfo(associatedTokenAddress);
       
-      // Create a new transaction
       const transaction = new web3.Transaction();
       
-      // If token account doesn't exist, create one
       if (!tokenAccount) {
         transaction.add(
           token.createAssociatedTokenAccountInstruction(
-            publicKey,               // payer
-            associatedTokenAddress,  // associated token account
-            publicKey,               // owner
-            mintPubkey               // mint
+            publicKey,
+            associatedTokenAddress,
+            publicKey,
+            mintPubkey
           )
         );
       }
       
-      // Add instruction to mint tokens
+      const mintAmount = decimals === 0 
+        ? Number(amount) 
+        : Number(amount) * Math.pow(10, decimals);
+      console.log('Mint amount:', mintAmount);
+      
       transaction.add(
         token.createMintToInstruction(
-          mintPubkey,              // mint
-          associatedTokenAddress,  // destination
-          publicKey,               // authority
-          Number(amount) * Math.pow(10, 9)  // amount (with decimals)
+          mintPubkey,
+          associatedTokenAddress,
+          publicKey,
+          BigInt(mintAmount)
         )
       );
       
-      // Send the transaction
-      const signature = await sendTransaction(transaction, connection);
+      const { blockhash, lastValidBlockHeight } = await reliableConnection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+      transaction.feePayer = publicKey;
       
-      // Wait for confirmation
-      await connection.confirmTransaction(signature, 'confirmed');
+      toast.loading('Sending transaction...', { id: toastId });
       
-      toast.success(`Successfully minted ${amount} tokens`);
+      const signature = await sendTransaction(transaction, reliableConnection);
       
-      // Reset form
+      toast.loading('Confirming transaction...', { id: toastId });
+      
+      await reliableConnection.confirmTransaction({
+        signature,
+        blockhash,
+        lastValidBlockHeight
+      });
+      
+      toast.success(`Successfully minted ${amount} tokens`, { id: toastId });
+      
       setAmount('');
     } catch (error) {
       console.error('Error minting tokens:', error);
-      toast.error('Failed to mint tokens. Please check the mint address and try again.');
+      toast.error(
+        error instanceof Error 
+          ? `Failed to mint tokens: ${error.message}` 
+          : 'Failed to mint tokens. Please check the mint address and try again.',
+        { id: toastId }
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="bg-white shadow-md rounded-lg p-6 mb-6">
-      <h2 className="text-2xl font-bold mb-4">Mint Tokens</h2>
+    <div className="bg-[#2E236C]  rounded-lg p-6 border-4 border-[#17153B] text-white">
+      <h2 className="text-2xl font-bold mb-4 text-primary">Mint Tokens</h2>
       <form onSubmit={handleMintToken}>
         <div className="mb-4">
-          <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="mintAddress">
+          <label className="block text-secondary text-sm font-bold mb-2" htmlFor="mintAddress">
             Token Mint Address
           </label>
           <input
             id="mintAddress"
             type="text"
-            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+            className="border border-neutral rounded w-full py-2 px-3 text-[gray-700] leading-tight focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
             placeholder="Enter token mint address"
             value={mintAddress}
             onChange={(e) => setMintAddress(e.target.value)}
@@ -102,14 +145,14 @@ export const MintToken: FC = () => {
           />
         </div>
         <div className="mb-6">
-          <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="amount">
+          <label className="block text-secondary text-sm font-bold mb-2" htmlFor="amount">
             Amount
           </label>
           <input
             id="amount"
             type="number"
-            min="1"
-            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+            min="0.000001"
+            className="border border-neutral rounded w-full py-2 px-3 text-[gray-700] leading-tight focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
             placeholder="Amount to mint"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
@@ -119,7 +162,7 @@ export const MintToken: FC = () => {
         <div className="flex items-center justify-between">
           <button
             type="submit"
-            className={`bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline ${
+            className={`bg-[#17153B] text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition-colors duration-200 ${
               isLoading ? 'opacity-50 cursor-not-allowed' : ''
             }`}
             disabled={isLoading || !publicKey}

@@ -17,9 +17,9 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className}>
         <WalletProvider>
-          <div className="flex flex-col min-h-screen">
+          <div className="">
             <Header />
-            <main className="flex-grow">{children}</main>
+            <main className="">{children}</main>
             <Footer />
           </div>
         </WalletProvider>
