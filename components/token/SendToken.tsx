@@ -57,10 +57,13 @@ export const SendToken: FC = () => {
         return;
       }
       
+      let actualDecimals = 9; // Default value
+      
       try {
         const mintInfo = await withRetry(() => 
           token.getMint(reliableConnection, mintPubkey)
         );
+        actualDecimals = mintInfo.decimals;
         setDecimals(mintInfo.decimals);
         console.log('Token decimals:', mintInfo.decimals);
       } catch (error) {
@@ -100,9 +103,8 @@ export const SendToken: FC = () => {
         );
       }
       
-      const transferAmount = decimals === 0 
-        ? Number(amount) 
-        : Number(amount) * Math.pow(10, decimals);
+      // Convert integer amount to the proper token amount with decimals
+      const transferAmount = Number(amount) * Math.pow(10, actualDecimals);
       
       console.log('Transfer amount:', transferAmount);
       
@@ -111,7 +113,7 @@ export const SendToken: FC = () => {
           sourceTokenAddress,
           destinationTokenAddress,
           publicKey,
-          BigInt(transferAmount)
+          BigInt(Math.floor(transferAmount))
         )
       );
       
@@ -190,13 +192,15 @@ export const SendToken: FC = () => {
           <input
             id="sendAmount"
             type="number"
-            min="0.000001"
+            min="1"
+            step="1"
             className="border border-neutral rounded w-full py-2 px-3 text-[gray-700] leading-tight focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-            placeholder="Amount to send"
+            placeholder="Amount to send (whole tokens)"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             disabled={isLoading}
           />
+          <p className="text-xs text-[#F6F8D5] mt-1">Enter whole token amounts (no decimals needed)</p>
         </div>
         <div className="flex items-center justify-between">
           <button

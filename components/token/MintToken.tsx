@@ -47,16 +47,18 @@ export const MintToken: FC = () => {
       }
       
       const reliableConnection = getReliableConnection(connection.rpcEndpoint);
+      let actualDecimals = 9; // Default value
       
       try {
         const mintInfo = await withRetry(() => 
           token.getMint(reliableConnection, mintPubkey)
         );
+        actualDecimals = mintInfo.decimals;
         setDecimals(mintInfo.decimals);
         console.log('Mint decimals:', mintInfo.decimals);
       } catch (error) {
         console.error('Error getting mint info:', error);
-        toast.error('Could not verify mint. Please check the address and try again.');
+        toast.error('Could not verify mint. Please check the address and try again.', { id: toastId });
         return;
       }
       
@@ -80,19 +82,21 @@ export const MintToken: FC = () => {
         );
       }
       
-      const mintAmount = decimals === 0 
-        ? Number(amount) 
-        : Number(amount) * Math.pow(10, decimals);
+      // Convert integer amount to the proper token amount with decimals
+      const mintAmount = Number(amount) * Math.pow(10, actualDecimals);
+      console.log('Mint decimals:', actualDecimals);
       console.log('Mint amount:', mintAmount);
+      console.log('number:', Number(amount));
       
       transaction.add(
         token.createMintToInstruction(
           mintPubkey,
           associatedTokenAddress,
           publicKey,
-          BigInt(mintAmount)
+          BigInt(Math.floor(mintAmount)) // Ensure we're using an integer value
         )
       );
+      console.log(BigInt(Math.floor(mintAmount)))
       
       const { blockhash, lastValidBlockHeight } = await reliableConnection.getLatestBlockhash();
       transaction.recentBlockhash = blockhash;
@@ -151,13 +155,15 @@ export const MintToken: FC = () => {
           <input
             id="amount"
             type="number"
-            min="0.000001"
+            min="1"
+            step="1"
             className="border border-neutral rounded w-full py-2 px-3 text-[gray-700] leading-tight focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-            placeholder="Amount to mint"
+            placeholder="Amount to mint (whole tokens)"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             disabled={isLoading}
           />
+          <p className="text-xs text-[#F6F8D5] mt-1">Enter whole token amounts (no decimals needed)</p>
         </div>
         <div className="flex items-center justify-between">
           <button
